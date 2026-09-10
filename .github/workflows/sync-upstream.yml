@@ -1,0 +1,58 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Run twice daily, away from the busiest minute-zero window.
+    - cron: "17 3,15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    name: Rebase onto upstream main
+    if: github.repository == 'hisaransh/t3code'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Rebase and update fork
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGIN_URL: https://github.com/hisaransh/t3code.git
+          UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
+        run: |
+          set -euo pipefail
+
+          git init .
+          git remote add origin "$ORIGIN_URL"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags upstream +refs/heads/main:refs/remotes/upstream/main
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout -b main origin/main
+
+          fork_head="$(git rev-parse HEAD)"
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Fork is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git rebase upstream/main; then
+            git rebase --abort
+            echo "The fork has conflicts with upstream/main. Resolve them manually, then rerun this workflow." >&2
+            exit 1
+          fi
+
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth_header" \
+            push --force-with-lease="refs/heads/main:$fork_head" origin HEAD:main
