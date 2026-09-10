@@ -7091,7 +7091,8 @@ export default function ChatView(props: ChatViewProps) {
         role: "user",
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        turnId: null,
+        turnId:
+          activeThread.session?.status === "running" ? activeThread.session.activeTurnId : null,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
@@ -7158,7 +7159,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
-    if (failure === null && isServerThread) {
+    if (failure === null && isServerThread && activeThread.session?.status !== "running") {
       const settingsResult = await persistThreadSettingsForNextTurn({
         threadId: threadIdForSend,
         createdAt: messageCreatedAt,
@@ -7229,6 +7230,9 @@ export default function ChatView(props: ChatViewProps) {
         environmentId,
         input: {
           threadId: threadIdForSend,
+          ...(activeThread.session?.status === "running" && activeThread.session.activeTurnId
+            ? { expectedTurnId: activeThread.session.activeTurnId }
+            : {}),
           message: {
             messageId: messageIdForSend,
             role: "user",

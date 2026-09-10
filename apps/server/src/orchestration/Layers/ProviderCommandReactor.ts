@@ -1335,6 +1335,60 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    if (event.payload.expectedTurnId !== undefined) {
+      // Steering bypasses session setup, model changes, and command expansion.
+      // It can only address the execution captured when the command landed.
+      yield* providerService
+        .sendTurn({
+          threadId: thread.id,
+          expectedTurnId: event.payload.expectedTurnId,
+          clientMessageId: event.payload.messageId,
+          input: message.text,
+          ...(message.attachments ? { attachments: message.attachments } : {}),
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              yield* orchestrationEngine.dispatch({
+                type: "thread.activity.append",
+                commandId: yield* serverCommandId("steering-delivered"),
+                threadId: thread.id,
+                activity: {
+                  id: yield* serverEventId(),
+                  tone: "info",
+                  kind: "provider.turn.steered",
+                  summary: "Instruction delivered to the running agent",
+                  payload: { requestId: event.payload.messageId },
+                  turnId: event.payload.expectedTurnId ?? null,
+                  createdAt: event.payload.createdAt,
+                },
+                createdAt: event.payload.createdAt,
+              });
+              yield* Effect.logDebug("steering delivered", {
+                threadId: thread.id,
+                turnId: event.payload.expectedTurnId,
+              });
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("steering delivery failed", {
+              threadId: thread.id,
+              turnId: event.payload.expectedTurnId,
+              cause: Cause.pretty(cause),
+            }).pipe(
+              Effect.andThen(
+                appendTurnStartFailure(
+                  "Steering failed",
+                  "The provider could not accept this instruction. It remains in history for retry; it was not queued or restarted.",
+                ),
+              ),
+            ),
+          ),
+          Effect.forkScoped,
+        );
+      return;
+    }
+
     const authCommandHandled = yield* Effect.gen(function* () {
       // Native account commands belong to the thread's existing provider session.
       const instanceId =

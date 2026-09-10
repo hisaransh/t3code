@@ -36,6 +36,7 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
+import { Radio, RadioGroup } from "../ui/radio-group";
 import {
   NumberField,
   NumberFieldDecrement,
@@ -61,6 +62,7 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -589,7 +591,66 @@ export function SourceControlSettingsPanel() {
 
       {/* Its rows are serverScoped: without a primary they render inert with
           an explanation, which beats disappearing. */}
+      <WorktreeCleanupSettingsSection />
       <SourceControlWritingSettingsSection />
     </SettingsPageContainer>
+  );
+}
+
+function WorktreeCleanupSettingsSection() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const policy = settings.worktreeCleanup;
+  return (
+    <SettingsSection title="Automatic worktree cleanup">
+      <SettingsRow
+        serverScoped
+        title="Cleanup policy"
+        description="Choose when inactive thread worktrees become eligible for safe cleanup."
+        control={
+          <RadioGroup
+            value={policy.mode}
+            onValueChange={(mode) => {
+              if (mode === "never" || mode === "archived" || mode === "merged")
+                updateSettings({ worktreeCleanup: { ...policy, mode } });
+            }}
+            className="gap-2"
+          >
+            {(
+              [
+                ["never", "Never"],
+                ["archived", "When thread is archived or deleted"],
+                ["merged", "When branch is merged"],
+              ] as const
+            ).map(([mode, label]) => (
+              <label key={mode} className="flex items-center gap-2 text-sm">
+                <Radio value={mode} />
+                {label}
+              </label>
+            ))}
+          </RadioGroup>
+        }
+      />
+      <SettingsRow
+        serverScoped
+        title="Only delete clean worktrees"
+        description="Worktrees with uncommitted or untracked files are always kept."
+        control={<Switch checked disabled aria-label="Only delete clean worktrees" />}
+      />
+      <SettingsRow
+        serverScoped
+        title="Delete local branch"
+        description="Delete the branch after cleanup only when Git confirms it is merged."
+        control={
+          <Switch
+            checked={policy.deleteBranch}
+            onCheckedChange={(deleteBranch) =>
+              updateSettings({ worktreeCleanup: { ...policy, deleteBranch } })
+            }
+            aria-label="Delete local branch after worktree cleanup"
+          />
+        }
+      />
+    </SettingsSection>
   );
 }

@@ -98,6 +98,7 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  CornerDownLeftIcon,
   DownloadIcon,
   EyeIcon,
   GlobeIcon,
@@ -1281,6 +1282,11 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         row.kind === "message" || row.kind === "assistant-meta" ? row.message.id : undefined
       }
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      data-message-kind={
+        row.kind === "message" && row.message.role === "user" && row.message.turnId !== null
+          ? "steer"
+          : undefined
+      }
     >
       {row.kind === "work" ? (
         <WorkGroupSection
@@ -1410,9 +1416,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
   const revertTurnCount = row.revertTurnCount;
+  const isSteeringInstruction = row.message.turnId !== null;
 
   return (
     <div className="group flex flex-col items-end gap-1">
+      {isSteeringInstruction ? (
+        <div className="flex items-center gap-1 pe-1 text-[11px] font-medium text-muted-foreground">
+          <CornerDownLeftIcon aria-hidden="true" className="size-3" />
+          <span>Steering instruction</span>
+        </div>
+      ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">

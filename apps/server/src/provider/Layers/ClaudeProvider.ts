@@ -54,6 +54,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 
 const CLAUDE_PRESENTATION = {
   displayName: "Claude",
+  supportsSteering: true,
   showInteractionModeToggle: true,
   reportsContextWindow: true,
 } as const;

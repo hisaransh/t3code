@@ -13,6 +13,13 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+## Steer a running agent
+
+While a Codex or Claude agent is running, send another message to add instructions
+to its current turn. The composer identifies this as steering, and submitted messages
+retain a **Steering instruction** label in history. Providers that cannot accept
+same-turn input keep the message in the composer and explain that steering is unavailable.
+
 ### Start in the background
 
 In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Enter`
@@ -90,6 +97,14 @@ are closed. Changes apply to connected environments that support shared settings
 offline environments and older servers keep their previous values. If connected
 environments disagree, **Apply to all** copies your current settings to those named
 in the warning. Changing a rule does not reopen already settled threads.
+
+## Clean up worktrees
+
+Choose an automatic cleanup policy in **Settings → Source Control**. Automatic cleanup
+only considers inactive archived or deleted thread worktrees and always keeps dirty,
+locked, detached, primary, active, or unmerged worktrees when the policy requires a
+merge. Use **Clean up worktree** from an archived thread's menu for the same safe checks
+on demand.
 
 ## Link a pull request
 

@@ -928,6 +928,13 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
+export const WorktreeCleanupSettings = Schema.Struct({
+  mode: Schema.Literals(["never", "archived", "merged"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("never" as const)),
+  ),
+  deleteBranch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -1028,6 +1035,9 @@ export const ServerSettings = Schema.Struct({
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
+  ),
+  worktreeCleanup: WorktreeCleanupSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ mode: "never" as const, deleteBranch: false })),
   ),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -1276,6 +1286,7 @@ export const ServerSettingsPatch = Schema.Struct({
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  worktreeCleanup: Schema.optionalKey(WorktreeCleanupSettings),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),

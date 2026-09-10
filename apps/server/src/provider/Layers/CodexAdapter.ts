@@ -2529,6 +2529,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     return yield* session.runtime
       .sendTurn({
+        ...(input.expectedTurnId ? { expectedTurnId: input.expectedTurnId } : {}),
+        ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
         ...(input.input !== undefined ? { input: input.input } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
@@ -2713,6 +2715,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   return {
     provider: PROVIDER,
     capabilities: {
+      steering: true,
       sessionModelSwitch: "in-session",
       promptlessTurnContinuation: true,
     },

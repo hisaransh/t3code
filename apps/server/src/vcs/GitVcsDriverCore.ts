@@ -3254,6 +3254,94 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
+    let cleanupBranch: string | undefined;
+    let cleanupTarget: string | undefined;
+    if (input.cleanup) {
+      const reject = (detail: string) =>
+        new GitCommandError({
+          operation: "GitVcsDriver.removeWorktree",
+          command: "git worktree remove",
+          cwd: input.cwd,
+          detail,
+        });
+      if (input.force) return yield* reject("Automatic cleanup never permits forced deletion.");
+      const listing = yield* executeGit("cleanup.list", input.cwd, [
+        "worktree",
+        "list",
+        "--porcelain",
+        "-z",
+      ]);
+      const entries = listing.stdout.split("\0\0").map((entry) => {
+        const fields = entry.split("\0");
+        return {
+          path: fields.find((field) => field.startsWith("worktree "))?.slice(9),
+          branch: fields.find((field) => field.startsWith("branch refs/heads/"))?.slice(18),
+          locked: fields.some((field) => field === "locked" || field.startsWith("locked ")),
+        };
+      });
+      const canonical = yield* fileSystem
+        .realPath(input.path)
+        .pipe(Effect.orElseSucceed(() => path.resolve(input.path)));
+      const canonicalEntries = yield* Effect.forEach(entries, (entry) =>
+        entry.path
+          ? fileSystem.realPath(entry.path).pipe(
+              Effect.orElseSucceed(() => path.resolve(entry.path!)),
+              Effect.map((resolved) => ({ ...entry, path: resolved })),
+            )
+          : Effect.succeed(entry),
+      );
+      if (canonicalEntries[0]?.path === canonical) {
+        return yield* reject("Cleanup skipped: this is the primary Git worktree.");
+      }
+      const entry = canonicalEntries.find((entry) => entry.path === canonical);
+      if (!entry) {
+        if (yield* fileSystem.exists(input.path).pipe(Effect.orElseSucceed(() => true))) {
+          return yield* reject("Cleanup skipped: directory is not a registered worktree.");
+        }
+        yield* pruneWorktrees({ cwd: input.cwd });
+        return;
+      }
+      if (entry.locked || !entry.branch) {
+        return yield* reject("Cleanup skipped: worktree is locked or has a detached HEAD.");
+      }
+      const status = yield* executeGit("cleanup.status", input.path, [
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+      ]);
+      if (status.stdout.trim()) {
+        return yield* reject("Cleanup skipped: worktree contains uncommitted or untracked files.");
+      }
+      const remote = yield* resolvePrimaryRemoteName(input.cwd);
+      const remoteBase = remote ? yield* resolveDefaultBranchName(input.cwd, remote) : null;
+      // `git worktree list` puts the primary checkout first. Its branch is the
+      // safest local fallback when a remote default branch is unavailable.
+      const base = remoteBase ?? canonicalEntries[0]?.branch ?? null;
+      if (entry.branch === base)
+        return yield* reject("Cleanup skipped: default branch is protected.");
+      const target = base
+        ? remote && remoteBase
+          ? `refs/remotes/${remote}/${base}`
+          : `refs/heads/${base}`
+        : undefined;
+      const merged = target
+        ? (yield* executeGit(
+            "cleanup.merged",
+            input.cwd,
+            ["merge-base", "--is-ancestor", `refs/heads/${entry.branch}`, target],
+            { allowNonZeroExit: true },
+          )).exitCode === 0
+        : false;
+      if (input.cleanup.mergedOnly && !merged) {
+        return yield* reject(
+          "Cleanup skipped: branch is not verified merged into the repository default branch.",
+        );
+      }
+      if (input.cleanup.deleteBranch && merged) {
+        cleanupBranch = entry.branch;
+        cleanupTarget = target;
+      }
+    }
     const args = ["worktree", "remove"];
     if (input.force) {
       args.push("--force");
@@ -3272,6 +3360,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       },
     );
     if (result.exitCode === 0) {
+      if (input.cleanup) {
+        yield* pruneWorktrees({ cwd: input.cwd });
+        if (cleanupBranch && cleanupTarget) {
+          const merged = yield* executeGit(
+            "cleanup.recheckMerged",
+            input.cwd,
+            ["merge-base", "--is-ancestor", `refs/heads/${cleanupBranch}`, cleanupTarget],
+            { allowNonZeroExit: true },
+          );
+          if (merged.exitCode === 0) {
+            yield* executeGit("cleanup.branch", input.cwd, ["branch", "-d", "--", cleanupBranch]);
+          }
+        }
+      }
       return;
     }
     // Threads can share a worktree path, and worktrees get removed or pruned

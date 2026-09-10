@@ -1765,6 +1765,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const sendDisabledReason =
     externalSendDisabledReason ??
+    (phase === "running" && selectedProviderEntry?.snapshot?.supportsSteering !== true
+      ? "This agent does not support steering during an active turn."
+      : null) ??
     (activePendingProgress
       ? attachmentBlockReason
       : (attachmentBlockReason ?? providerSendBlockReason));
@@ -5707,7 +5710,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
                                 ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                : phase === "running"
+                                  ? (sendDisabledReason ?? "Steer the agent...")
+                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
                   }
                   disabled={
                     isConnecting ||

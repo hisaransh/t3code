@@ -20,6 +20,7 @@ import {
   ProviderRuntimeEvent,
   type RuntimeMode,
   ThreadId,
+  TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -1446,13 +1447,31 @@ describe("ClaudeAdapterLive", () => {
       });
 
       // Steer: a second sendTurn while the turn is still running continues
-      // the same turn — the message is queued into the live agent loop.
+      // the same turn through the live SDK input stream.
       const steeredTurn = yield* adapter.sendTurn({
         threadId: session.threadId,
+        expectedTurnId: turn.turnId,
         input: "actually run 15",
         attachments: [],
       });
       assert.equal(String(steeredTurn.turnId), String(turn.turnId));
+      const secondSteer = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        expectedTurnId: turn.turnId,
+        input: "and keep the public API unchanged",
+        attachments: [],
+      });
+      assert.equal(String(secondSteer.turnId), String(turn.turnId));
+
+      const staleSteer = yield* adapter
+        .sendTurn({
+          threadId: session.threadId,
+          expectedTurnId: TurnId.make("stale-turn"),
+          input: "do not deliver this",
+          attachments: [],
+        })
+        .pipe(Effect.flip);
+      assert.match(staleSteer.message, /active turn has completed or changed/i);
 
       harness.query.emit({
         type: "assistant",

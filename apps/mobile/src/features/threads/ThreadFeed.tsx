@@ -1474,8 +1474,22 @@ function renderFeedEntry(
       !message.streaming;
 
     if (isUser) {
+      const isSteeringInstruction = message.turnId !== null;
       return (
         <View className="mb-5 items-end">
+          {isSteeringInstruction ? (
+            <View className="mb-1 flex-row items-center gap-1 pr-1">
+              <SymbolView
+                name="arrow.turn.left.up"
+                size={12}
+                tintColor={iconSubtleColor}
+                type="monochrome"
+              />
+              <Text className="font-t3-medium text-xs text-foreground-muted">
+                Steering instruction
+              </Text>
+            </View>
+          ) : null}
           <View
             className="min-w-0 gap-2 rounded-[20px] px-3.5 py-2.5"
             style={{

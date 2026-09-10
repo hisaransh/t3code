@@ -43,6 +43,8 @@ export type ProviderCompaction<TError> =
   | { readonly type: "slash-command"; readonly command: `/${string}` };
 
 export interface ProviderAdapterCapabilities {
+  /** Native same-turn input with an atomic active-turn precondition. */
+  readonly steering?: boolean;
   /**
    * Declares whether changing the model on an existing session is supported.
    */

@@ -1281,6 +1281,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const expectedTurnId =
+        command.expectedTurnId ??
+        (targetThread.session?.status === "running"
+          ? targetThread.session.activeTurnId
+          : undefined);
+      if (
+        command.expectedTurnId &&
+        (targetThread.session?.status !== "running" ||
+          targetThread.session.activeTurnId !== command.expectedTurnId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The active turn has completed or changed. Your instruction was not sent.",
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1319,7 +1334,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           role: "user",
           text: command.message.text,
           attachments: command.message.attachments,
-          turnId: null,
+          turnId: expectedTurnId ?? null,
           streaming: false,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -1337,6 +1352,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
+          ...(expectedTurnId ? { expectedTurnId } : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),

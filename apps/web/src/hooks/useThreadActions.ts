@@ -363,7 +363,7 @@ export function useThreadActions() {
               "This thread is the only one linked to this worktree:",
               displayWorktreePath ?? orphanedWorktreePath,
               "",
-              "Delete the worktree too?",
+              "Clean up the worktree too? Cleanup is skipped if Git finds local changes.",
             ].join("\n"),
             { variant: "destructive" },
           ),
@@ -439,7 +439,7 @@ export function useThreadActions() {
         input: {
           cwd: threadProject.workspaceRoot,
           path: orphanedWorktreePath,
-          force: true,
+          cleanup: { mergedOnly: false, deleteBranch: false },
         },
       });
       const refreshResult =

@@ -161,6 +161,12 @@ export const GitPreparePullRequestThreadInput = Schema.Struct({
 export type GitPreparePullRequestThreadInput = typeof GitPreparePullRequestThreadInput.Type;
 
 export const VcsRemoveWorktreeInput = Schema.Struct({
+  cleanup: Schema.optional(
+    Schema.Struct({
+      mergedOnly: Schema.Boolean,
+      deleteBranch: Schema.Boolean,
+    }),
+  ),
   cwd: TrimmedNonEmptyStringSchema,
   path: TrimmedNonEmptyStringSchema,
   force: Schema.optional(Schema.Boolean),

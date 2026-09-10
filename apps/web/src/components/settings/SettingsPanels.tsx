@@ -1,3 +1,5 @@
+import { vcsEnvironment } from "../../state/vcs";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Spinner } from "~/components/ui/spinner";
 import { ArchiveIcon, ArchiveX, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -2887,6 +2889,7 @@ export function GeneralSettingsPanel() {
 }
 
 export function ArchivedThreadsPanel() {
+  const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const projects = useProjects();
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
   const environmentIds = useMemo(
@@ -2948,10 +2951,49 @@ export function ArchivedThreadsPanel() {
       const clicked = await api.contextMenu.show(
         [
           { id: "unarchive", label: "Unarchive" },
+          { id: "cleanup", label: "Clean up worktree" },
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
       );
+
+      if (clicked === "cleanup") {
+        const snapshot = archivedSnapshots.find(
+          (entry) => entry.environmentId === threadRef.environmentId,
+        )?.snapshot;
+        const thread = snapshot?.threads.find((entry) => entry.id === threadRef.threadId);
+        const project = snapshot?.projects.find((entry) => entry.id === thread?.projectId);
+        if (!thread?.worktreePath || !project) {
+          toastManager.add(
+            stackedThreadToast({ type: "info", title: "This thread has no worktree" }),
+          );
+          return;
+        }
+        const result = await removeWorktree({
+          environmentId: threadRef.environmentId,
+          input: {
+            cwd: project.workspaceRoot,
+            path: thread.worktreePath,
+            cleanup: { mergedOnly: false, deleteBranch: false },
+          },
+        });
+        const error = result._tag === "Failure" ? squashAtomCommandFailure(result) : null;
+        toastManager.add(
+          stackedThreadToast({
+            type: error ? "error" : "success",
+            title: error ? "Worktree cleanup skipped" : "Worktree cleaned up",
+            ...(error
+              ? {
+                  description:
+                    error instanceof Error
+                      ? error.message
+                      : "Cleanup failed; no forced deletion was attempted.",
+                }
+              : {}),
+          }),
+        );
+        return;
+      }
 
       if (clicked === "unarchive") {
         const result = await unarchiveThread(threadRef);
@@ -2986,7 +3028,13 @@ export function ArchivedThreadsPanel() {
         }
       }
     },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
+    [
+      archivedSnapshots,
+      removeWorktree,
+      confirmAndDeleteThread,
+      refreshArchivedThreads,
+      unarchiveThread,
+    ],
   );
 
   return (

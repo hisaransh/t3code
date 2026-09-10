@@ -1,3 +1,4 @@
+import { withWorktreeActivity } from "../../git/worktreeLifecycleGate.ts";
 /**
  * ProviderServiceLive - Cross-provider orchestration layer.
  *
@@ -1636,6 +1637,38 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.sendTurn",
         allowRecovery: false,
       });
+      if (input.expectedTurnId !== undefined) {
+        yield* Effect.logDebug("steering requested", {
+          threadId: input.threadId,
+          turnId: input.expectedTurnId,
+        });
+        if (!routed.isActive || routed.adapter.capabilities.steering !== true) {
+          yield* Effect.logDebug("steering provider unsupported", {
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+          });
+          return yield* toValidationError(
+            "ProviderService.sendTurn",
+            "This provider does not support steering an active turn.",
+          );
+        }
+        const session = (yield* routed.adapter.listSessions()).find(
+          (session) => session.threadId === input.threadId,
+        );
+        if (session?.status !== "running" || session.activeTurnId !== input.expectedTurnId) {
+          yield* Effect.logDebug("steering rejected because session completed", {
+            threadId: input.threadId,
+            turnId: input.expectedTurnId,
+          });
+          return yield* toValidationError(
+            "ProviderService.sendTurn",
+            "The active turn has completed or changed. The instruction was not sent.",
+          );
+        }
+        // No recovery, session restart, analytics turn admission, or directory
+        // running-state write for same-turn input.
+        return yield* routed.adapter.sendTurn(input);
+      }
       if (
         input.continuation === true &&
         !input.input &&
@@ -2302,19 +2335,32 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  const withThreadActivity = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+    listSessions().pipe(
+      Effect.flatMap((sessions) =>
+        withWorktreeActivity(
+          sessions.find((session) => session.threadId === threadId)?.cwd,
+          effect,
+        ),
+      ),
+    );
+
   return {
-    startSession,
-    sendTurn,
-    compactThread,
-    interruptTurn,
-    respondToRequest,
-    respondToUserInput,
-    stopSession,
+    startSession: (threadId, input) =>
+      withWorktreeActivity(input.cwd, startSession(threadId, input)),
+    sendTurn: (input) => withThreadActivity(input.threadId, sendTurn(input)),
+    compactThread: (threadId, modelSelection, requestId) =>
+      withThreadActivity(threadId, compactThread(threadId, modelSelection, requestId)),
+    interruptTurn: (input) => withThreadActivity(input.threadId, interruptTurn(input)),
+    respondToRequest: (input) => withThreadActivity(input.threadId, respondToRequest(input)),
+    respondToUserInput: (input) => withThreadActivity(input.threadId, respondToUserInput(input)),
+    stopSession: (input) => withThreadActivity(input.threadId, stopSession(input)),
     listSessions,
     getCapabilities,
     getInstanceInfo,
     assertConversationRollbackSupported,
-    rollbackConversation,
+    rollbackConversation: (input) =>
+      withThreadActivity(input.threadId, rollbackConversation(input)),
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

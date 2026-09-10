@@ -1,3 +1,4 @@
+import { withWorktreeActivity } from "../git/worktreeLifecycleGate.ts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -3036,7 +3037,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
 
   return TerminalManager.of({
-    open,
+    open: (input) => withWorktreeActivity(input.cwd, open(input)),
     attachStream,
     write,
     resize,

@@ -1028,7 +1028,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     editorRef={composerEditorRef}
                     draftMessage={props.draftMessage}
                     draftAttachments={props.draftAttachments}
-                    placeholder="Ask the repo agent, or run a command…"
+                    placeholder={
+                      props.selectedThread.session?.status === "running"
+                        ? "Steer the agent…"
+                        : "Ask the repo agent, or run a command…"
+                    }
                     contentMaxWidth={contentMaxWidth}
                     connectionState={props.connectionStateLabel}
                     environmentLabel={props.environmentLabel}

@@ -607,6 +607,21 @@ describe("provider enabled defaults", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
+  it("defaults automatic cleanup off and branch deletion off", () => {
+    expect(decodeServerSettings({}).worktreeCleanup).toEqual({
+      mode: "never",
+      deleteBranch: false,
+    });
+  });
+
+  it("accepts automatic cleanup policy updates", () => {
+    expect(
+      decodeServerSettingsPatch({
+        worktreeCleanup: { mode: "merged", deleteBranch: true },
+      }).worktreeCleanup,
+    ).toEqual({ mode: "merged", deleteBranch: true });
+  });
+
   it("defaults start-from-origin on for legacy configs", () => {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
   });

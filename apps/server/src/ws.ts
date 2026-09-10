@@ -1,3 +1,6 @@
+import * as Predicate from "effect/Predicate";
+import { withWorktreeActivity } from "./git/worktreeLifecycleGate.ts";
+import { cleanupWorktree } from "./git/worktreeCleanup.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -1321,6 +1324,14 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
               const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const steeringCommand =
+                normalizedCommand.type === "thread.turn.start" && normalizedCommand.expectedTurnId
+                  ? normalizedCommand
+                  : undefined;
+              const steeringEvents = steeringCommand
+                ? yield* orchestrationEngine.subscribeDomainEvents
+                : undefined;
+
               // Archive removes the thread from the client, so this transport
               // closes its session and terminals after the command lands.
               // Settlement cleanup is driven by thread.settled events in the
@@ -1350,6 +1361,46 @@ const makeWsRpcLayer = (
               const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
                 Effect.tapError(() => cleanupFailedUploadedAttachments(command, normalizedCommand)),
               );
+              if (steeringCommand && steeringEvents) {
+                const isReceipt = (activity: { kind: string; payload: unknown }) =>
+                  (activity.kind === "provider.turn.steered" ||
+                    activity.kind === "provider.turn.start.failed") &&
+                  Predicate.isObject(activity.payload) &&
+                  activity.payload.requestId === steeringCommand.message.messageId;
+                const detail = yield* projectionSnapshotQuery.getThreadDetailById(
+                  steeringCommand.threadId,
+                );
+                const persisted = Option.isSome(detail)
+                  ? detail.value.activities.find(isReceipt)
+                  : undefined;
+                const receipt =
+                  persisted ??
+                  (yield* steeringEvents.pipe(
+                    Stream.filter(
+                      (event) =>
+                        (event.type === "thread.deleted" &&
+                          event.payload.threadId === steeringCommand.threadId) ||
+                        (event.type === "thread.activity-appended" &&
+                          event.payload.threadId === steeringCommand.threadId &&
+                          isReceipt(event.payload.activity)),
+                    ),
+                    Stream.runHead,
+                    Effect.map(
+                      Option.flatMap((event) =>
+                        event.type === "thread.activity-appended"
+                          ? Option.some(event.payload.activity)
+                          : Option.none(),
+                      ),
+                    ),
+                    Effect.map(Option.getOrUndefined),
+                  ));
+                if (receipt?.kind !== "provider.turn.steered") {
+                  return yield* new OrchestrationDispatchCommandError({
+                    message:
+                      "Steering failed: the active execution could not accept this instruction. Your text is available for retry.",
+                  });
+                }
+              }
               yield* recordClientCommandAnalytics(normalizedCommand);
               if (archiveCommand) {
                 if (shouldStopSessionAfterCommand) {
@@ -1387,6 +1438,7 @@ const makeWsRpcLayer = (
               }
               return result;
             }).pipe(
+              Effect.scoped,
               Effect.mapError((cause) =>
                 isOrchestrationDispatchCommandError(cause)
                   ? cause
@@ -2626,7 +2678,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRemoveWorktree,
-            gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            (input.cleanup
+              ? cleanupWorktree(input).pipe(Effect.asVoid)
+              : withWorktreeActivity(input.path, gitWorkflow.removeWorktree(input))
+            ).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsCreateRef]: (input) =>

@@ -184,6 +184,8 @@ export interface CodexSessionRuntimeOptions {
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
+  readonly expectedTurnId?: TurnId;
+  readonly clientMessageId?: string;
   readonly input?: string;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
@@ -2343,7 +2345,7 @@ export const makeCodexSessionRuntime = (
       sendTurn: (input) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          if (hasConfiguredMcpServer(options.appServerArgs)) {
+          if (input.expectedTurnId === undefined && hasConfiguredMcpServer(options.appServerArgs)) {
             yield* client.request("config/mcpServer/reload", undefined).pipe(
               Effect.catch((cause) =>
                 Effect.logWarning("Failed to refresh Codex MCP tool catalog before turn.", {
@@ -2372,6 +2374,21 @@ export const makeCodexSessionRuntime = (
               options.mcpCapabilities,
             ),
           });
+          if (input.expectedTurnId !== undefined) {
+            const response = yield* client.request("turn/steer", {
+              threadId: providerThreadId,
+              expectedTurnId: input.expectedTurnId,
+              ...(input.clientMessageId ? { clientUserMessageId: input.clientMessageId } : {}),
+              input: params.input,
+            });
+            // The provider owns the atomic check. Never restore running state:
+            // completion may already have arrived while this RPC was pending.
+            return {
+              threadId: options.threadId,
+              turnId: TurnId.make(response.turnId),
+              resumeCursor: { threadId: providerThreadId },
+            };
+          }
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
             Effect.mapError((error) =>

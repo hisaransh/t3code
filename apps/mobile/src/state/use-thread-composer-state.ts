@@ -1,5 +1,6 @@
+import { prepareTurnAttachments } from "../lib/attachmentUpload";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 
 import {
@@ -102,6 +103,8 @@ export function useThreadDraftForThread(input: {
 }
 
 export function useThreadComposerState() {
+  const steeringInFlight = useRef(false);
+  const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const {
     selectedThread: selectedThreadShell,
     selectedThreadCreation,
@@ -341,6 +344,60 @@ export function useThreadComposerState() {
     const provider = serverConfig?.providers.find(
       (entry) => entry.instanceId === modelSelection.instanceId,
     );
+    if (thread.session?.status === "running") {
+      if (steeringInFlight.current) return null;
+      if (
+        selectedEnvironmentRuntime?.connectionState !== "connected" ||
+        provider?.supportsSteering !== true ||
+        !thread.session.activeTurnId
+      ) {
+        Alert.alert(
+          "Steering unavailable",
+          "Connect to an agent that supports steering during an active turn. Your text has been kept.",
+        );
+        return null;
+      }
+      const expectedTurnId = thread.session.activeTurnId;
+      const metadata = makeQueuedMessageMetadata();
+      const messageId = MessageId.make(metadata.messageId);
+      steeringInFlight.current = true;
+      try {
+        const prepared = await prepareTurnAttachments({
+          environmentId: selectedThreadShell.environmentId,
+          attachments,
+          supportsImageUploads: serverConfig?.environment.capabilities.attachmentUploads === true,
+        });
+        if (prepared.status !== "ready") return null;
+        const result = await startTurn({
+          environmentId: selectedThreadShell.environmentId,
+          input: {
+            commandId: CommandId.make(metadata.commandId),
+            threadId: selectedThreadShell.id,
+            expectedTurnId,
+            message: { messageId, role: "user", text, attachments: prepared.attachments },
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            createdAt: metadata.createdAt,
+          },
+        });
+        if (result._tag === "Failure") {
+          Alert.alert(
+            "Steering failed",
+            "The instruction was not accepted. Your text has been kept for retry.",
+          );
+          return null;
+        }
+        if (getComposerDraftSnapshot(threadKey).text === draft.text)
+          clearComposerDraftContent(threadKey);
+        return messageId;
+      } catch {
+        Alert.alert("Steering failed", "Your text has been kept for retry.");
+        return null;
+      } finally {
+        steeringInFlight.current = false;
+      }
+    }
+
     const feedbackCommand =
       attachments.length === 0 &&
       (provider?.driver === "codex" || thread.session?.providerName === "codex")
@@ -433,6 +490,7 @@ export function useThreadComposerState() {
     selectedThreadDetail,
     selectedThreadShell,
     uploadThreadFeedback,
+    startTurn,
   ]);
 
   const onChangeDraftMessage = useCallback(

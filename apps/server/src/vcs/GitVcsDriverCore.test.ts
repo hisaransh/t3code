@@ -1553,6 +1553,57 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    for (const scenario of ["merged", "dirty", "unmerged", "locked", "primary", "force"] as const) {
+      it.effect(`safe cleanup: ${scenario}`, () =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          yield* git(cwd, ["branch", "-m", "trunk"]);
+          yield* git(cwd, ["remote", "add", "origin", cwd]);
+          yield* git(cwd, ["update-ref", "refs/remotes/origin/trunk", "HEAD"]);
+          yield* git(cwd, [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+          ]);
+          const paths = yield* Path.Path;
+          const worktreePath = paths.join(yield* makeTmpDir(), "feature");
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.createWorktree({
+            cwd,
+            path: worktreePath,
+            refName: "trunk",
+            newRefName: "feature",
+          });
+          if (scenario === "dirty") yield* writeTextFile(worktreePath, "valuable.txt", "keep me");
+          if (scenario === "unmerged") {
+            yield* writeTextFile(worktreePath, "new.txt", "unmerged work");
+            yield* git(worktreePath, ["add", "."]);
+            yield* git(worktreePath, ["commit", "-m", "unmerged change"]);
+          }
+          if (scenario === "locked") yield* git(cwd, ["worktree", "lock", worktreePath]);
+          const input = {
+            cwd,
+            path: scenario === "primary" ? cwd : worktreePath,
+            force: scenario === "force",
+            cleanup: { mergedOnly: true, deleteBranch: true },
+          };
+          const fs = yield* FileSystem.FileSystem;
+          if (scenario === "merged") {
+            yield* driver.removeWorktree(input);
+            assert.equal(yield* fs.exists(worktreePath), false);
+            assert.equal((yield* driver.listLocalBranchNames(cwd)).includes("feature"), false);
+            yield* driver.removeWorktree(input);
+          } else {
+            const error = yield* driver.removeWorktree(input).pipe(Effect.flip);
+            assert.ok(error.detail.includes("Cleanup") || error.detail.includes("forced"));
+            assert.equal(yield* fs.exists(worktreePath), true);
+            assert.equal((yield* driver.listLocalBranchNames(cwd)).includes("feature"), true);
+          }
+        }),
+      );
+    }
+
     // NTFS rejects a newline in a file name, so there is nothing to preserve there.
     it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
       "preserves newline characters in worktree paths when listing refs",

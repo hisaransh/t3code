@@ -4900,18 +4900,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ? { ...selectedModel, model: resolveClaudeModelSlug(modelCatalog, selectedModel.model) }
       : undefined;
 
-    // A sendTurn while a real turn is running is a steer: the message is
-    // queued into the live SDK agent loop and the work continues as the same
+    // A sendTurn while a real turn is running is a steer: the message enters
+    // the live SDK input stream and the work continues as the same
     // turn — no synthetic turn boundary. Stale synthetic turns (from
     // background agent responses between user prompts) are auto-closed
     // instead, so they don't block the user's next turn.
     const steeringTurnState =
       context.turnState && context.turnState.synthetic !== true ? context.turnState : null;
+    if (input.expectedTurnId !== undefined && steeringTurnState?.turnId !== input.expectedTurnId) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/steer",
+        detail: "The active turn has completed or changed. The instruction was not sent.",
+      });
+    }
     if (context.turnState && steeringTurnState === null) {
       yield* completeTurn(context, "completed");
     }
 
-    if (modelSelection?.model) {
+    if (input.expectedTurnId === undefined && modelSelection?.model) {
       const apiModelId = resolveClaudeCatalogApiModelId(modelCatalog, modelSelection);
       if (context.currentApiModelId !== apiModelId) {
         yield* Effect.tryPromise({
@@ -4938,12 +4945,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "plan" maps directly to the SDK's "plan" permission mode;
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
+    if (input.expectedTurnId === undefined && input.interactionMode === "plan") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default") {
+    } else if (input.expectedTurnId === undefined && input.interactionMode === "default") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
@@ -5014,6 +5021,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           .map((skill) => skill.name),
       ),
     });
+
+    if (input.expectedTurnId !== undefined && context.turnState?.turnId !== input.expectedTurnId) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/steer",
+        detail: "The active turn completed while the instruction was being prepared.",
+      });
+    }
 
     yield* Queue.offer(context.promptQueue, {
       type: "message",
@@ -5140,6 +5155,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      steering: true,
     },
     compaction: { type: "slash-command", command: "/compact" },
     startSession,

@@ -274,6 +274,7 @@ function makeFakeCodexAdapter(
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      steering: provider === CODEX_DRIVER || provider === CLAUDE_AGENT_DRIVER,
       ...(supportsConversationRollback !== undefined ? { supportsConversationRollback } : {}),
       ...(provider === CODEX_DRIVER ? { promptlessTurnContinuation: true } : {}),
     },
@@ -1620,8 +1621,8 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const claudeThreadId = asThreadId("thread-promptless-continuation-unsupported");
       yield* provider.startSession(claudeThreadId, {
-        provider: CLAUDE_AGENT_DRIVER,
-        providerInstanceId: claudeAgentInstanceId,
+        provider: CURSOR_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
         threadId: claudeThreadId,
         runtimeMode: "full-access",
       });
@@ -4964,5 +4965,67 @@ describe("agent browser access", () => {
       const issued = yield* startSessionWith({ browser: false, device: false }, threadId, true);
       assert.deepEqual(issued, [{ threadId, capabilities: ["preview", "pull-requests"] }]);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+const steering = makeProviderServiceLayer();
+steering.layer("strict active-turn steering", (it) => {
+  it.effect(
+    "routes multiple instructions to the same execution without starting or interrupting",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* ProviderService.ProviderService;
+        const threadId = asThreadId("steering-thread");
+        const session = yield* service.startSession(threadId, {
+          threadId,
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          runtimeMode: "full-access",
+        });
+        const turnId = asTurnId("active-steering-turn");
+        steering.codex.listSessions.mockReturnValue(
+          Effect.succeed([{ ...session, status: "running", activeTurnId: turnId }]),
+        );
+        steering.codex.sendTurn.mockClear();
+        const starts = steering.codex.startSession.mock.calls.length;
+        for (const input of ["Keep the API", "Also preserve tests"]) {
+          yield* service.sendTurn({ threadId, expectedTurnId: turnId, input });
+        }
+        assert.equal(steering.codex.sendTurn.mock.calls.length, 2);
+        assert.equal(steering.codex.startSession.mock.calls.length, starts);
+        assert.equal(steering.codex.interruptTurn.mock.calls.length, 0);
+        assert.equal(steering.codex.stopSession.mock.calls.length, 0);
+        assert.deepInclude(steering.codex.sendTurn.mock.calls[1]?.[0], {
+          threadId,
+          expectedTurnId: turnId,
+          input: "Also preserve tests",
+        });
+        for (const expectedTurnId of [asTurnId("other-thread-turn"), turnId]) {
+          if (expectedTurnId === turnId)
+            steering.codex.listSessions.mockReturnValue(
+              Effect.succeed([{ ...session, status: "ready" }]),
+            );
+          yield* service
+            .sendTurn({ threadId, expectedTurnId, input: "too late" })
+            .pipe(Effect.flip);
+        }
+        assert.equal(steering.codex.sendTurn.mock.calls.length, 2);
+      }),
+  );
+  it.effect("rejects unsupported providers without delivering input", () =>
+    Effect.gen(function* () {
+      const service = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("unsupported-steering-thread");
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: CURSOR_DRIVER,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        runtimeMode: "full-access",
+      });
+      yield* service
+        .sendTurn({ threadId, expectedTurnId: asTurnId("turn"), input: "steer" })
+        .pipe(Effect.flip);
+      assert.equal(steering.cursor.sendTurn.mock.calls.length, 0);
+    }),
   );
 });

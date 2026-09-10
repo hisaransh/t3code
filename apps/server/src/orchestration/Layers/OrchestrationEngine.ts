@@ -1,3 +1,4 @@
+import { withWorktreeActivity } from "../../git/worktreeLifecycleGate.ts";
 import type {
   OrchestrationClientOrigin,
   OrchestrationEvent,
@@ -451,7 +452,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     readEvents,
     readThreadEvents,
     getThreadReplayStats,
-    dispatch,
+    dispatch: (command, options) =>
+      command.type === "thread.create" ||
+      command.type === "thread.unarchive" ||
+      command.type === "thread.meta.update"
+        ? withWorktreeActivity(undefined, dispatch(command, options))
+        : dispatch(command, options),
     subscribeDomainEvents: PubSub.subscribe(eventPubSub).pipe(Effect.map(Stream.fromSubscription)),
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
